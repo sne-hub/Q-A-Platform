@@ -12,4 +12,3 @@ npm run dev
 - Ask form: [http://localhost:3000](http://localhost:3000)
 - Admin dashboard: [http://localhost:3000/dashboard](http://localhost:3000/dashboard)
 
-The default admin password is `sanral`. Override it with `ADMIN_PASSWORD` in `.env.local`.
