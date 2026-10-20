@@ -374,6 +374,7 @@ textarea:focus {
 }
 
 @media (max-width: 720px) {
+
   .form-grid.two,
   .dash-head,
   .dash-stats,
@@ -388,6 +389,8 @@ textarea:focus {
   .nav {
     justify-content: flex-start;
   }
+
+  
 
   .hero h1 {
     max-width: none;

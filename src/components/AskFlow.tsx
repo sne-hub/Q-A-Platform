@@ -327,6 +327,7 @@ export function AskFlow() {
           <span className="step-pill" data-current={step === "details"}>
             1. Your details
           </span>
+
           <span className="step-pill" data-current={step !== "details"}>
             2. Your questions
           </span>
@@ -407,7 +408,13 @@ export function AskFlow() {
 
       {participant ? (
         <section className="own-questions">
-          <div className="view-switch" role="tablist" aria-label="Your submissions">
+          <div className="view-switch" role="tablist" aria-label="Your submissions"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              columnGap: "16px"
+            }}
+          >
             <button
               type="button"
               role="tab"
@@ -430,7 +437,7 @@ export function AskFlow() {
               {participant.editedAt ? <EditedTag /> : null}
             </button>
           </div>
-
+          <br></br>
           {view === "questions" ? (
             <div role="tabpanel">
               <QuestionGroups
