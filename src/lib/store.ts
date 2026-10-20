@@ -1,193 +1,103 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { supabaseAdmin as db } from "@/lib/supabase/server";
 import { MAX_QUESTIONS_PER_PERSON, type Participant, type Profile, type Question } from "./types";
 
-const DATA_DIR = path.join(process.cwd(), "data");
-const DATA_FILE = path.join(DATA_DIR, "questions.json");
+/* ---------- row <-> object mapping ---------- */
 
-type StoreShape = {
-  questions: Question[];
-  participants: Participant[];
-};
+type Row = Record<string, any>;
+
+const profileRow = (p: Profile) => ({
+  first_name: p.firstName,
+  last_name: p.lastName,
+  email: p.email,
+  phone: p.phone,
+  company: p.company,
+  designation: p.designation,
+});
+
+const toParticipant = (r: Row): Participant => ({
+  participantId: r.id,
+  firstName: r.first_name ?? "",
+  lastName: r.last_name ?? "",
+  email: r.email ?? "",
+  phone: r.phone ?? "",
+  company: r.company ?? "",
+  designation: r.designation ?? "",
+  finished: r.finished,
+  editedAt: r.edited_at ?? null,
+});
+
+const toQuestion = (r: Row): Question => ({
+  id: r.id,
+  participantId: r.participant_id,
+  firstName: r.first_name ?? "",
+  lastName: r.last_name ?? "",
+  email: r.email ?? "",
+  phone: r.phone ?? "",
+  company: r.company ?? "",
+  designation: r.designation ?? "",
+  body: r.body,
+  createdAt: r.created_at,
+  editedAt: r.edited_at ?? null,
+});
+
+function check<T>(res: { data: T; error: { message: string } | null }): T {
+  if (res.error) throw new Error(res.error.message);
+  return res.data;
+}
+
+/* ---------- live-update listeners (in-memory, used by the stream route) ---------- */
 
 const globalStore = globalThis as typeof globalThis & {
-  __qaStore?: StoreShape;
-  __qaWriteQueue?: Promise<void>;
   __qaListeners?: Set<(questions: Question[]) => void>;
 };
 
-function getMemory(): StoreShape {
-  if (!globalStore.__qaStore) {
-    globalStore.__qaStore = { questions: [], participants: [] };
-  }
-  return globalStore.__qaStore;
-}
-
 export function getListeners(): Set<(questions: Question[]) => void> {
-  if (!globalStore.__qaListeners) {
-    globalStore.__qaListeners = new Set();
-  }
+  if (!globalStore.__qaListeners) globalStore.__qaListeners = new Set();
   return globalStore.__qaListeners;
 }
 
-async function persist(store: StoreShape) {
-  globalStore.__qaWriteQueue = (globalStore.__qaWriteQueue ?? Promise.resolve())
-    .catch(() => undefined)
-    .then(async () => {
-      await mkdir(DATA_DIR, { recursive: true });
-      await writeFile(DATA_FILE, JSON.stringify(store, null, 2), "utf8");
-    });
-  await globalStore.__qaWriteQueue;
+async function notify() {
+  const listeners = getListeners();
+  if (listeners.size === 0) return;
+  const questions = await listQuestions();
+  for (const listener of listeners) listener(questions);
 }
 
-function notify() {
-  const questions = [...getMemory().questions].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-  );
-  for (const listener of getListeners()) {
-    listener(questions);
-  }
-}
-
-let loaded = false;
-
-function asQuestion(value: Question): Question {
-  return {
-    id: value.id,
-    participantId: value.participantId,
-    firstName: value.firstName ?? "",
-    lastName: value.lastName ?? "",
-    email: value.email ?? "",
-    phone: value.phone ?? "",
-    company: value.company ?? "",
-    designation: value.designation ?? "",
-    body: value.body,
-    createdAt: value.createdAt,
-    editedAt: value.editedAt ?? null,
-  };
-}
-
-export async function loadStore(): Promise<StoreShape> {
-  const memory = getMemory();
-  if (loaded) return memory;
-  loaded = true;
-  try {
-    const raw = await readFile(DATA_FILE, "utf8");
-    const parsed = JSON.parse(raw) as Partial<StoreShape>;
-    if (Array.isArray(parsed.questions)) {
-      memory.questions = parsed.questions.map(asQuestion);
-    }
-    if (Array.isArray(parsed.participants)) {
-      memory.participants = parsed.participants;
-    }
-  } catch {
-    // First run or empty file — start with an empty list.
-  }
-  return memory;
-}
+/* ---------- questions ---------- */
 
 export async function listQuestions(): Promise<Question[]> {
-  const store = await loadStore();
-  return [...store.questions].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  const data = check(
+    await db.from("questions").select("*").order("created_at", { ascending: false }),
   );
-}
-
-export async function getParticipant(participantId: string) {
-  const store = await loadStore();
-  return store.participants.find((item) => item.participantId === participantId) ?? null;
-}
-
-export async function getParticipantByEmail(email: string) {
-  const store = await loadStore();
-  const needle = email.trim().toLowerCase();
-  return (
-    store.participants.find((item) => item.email.trim().toLowerCase() === needle) ?? null
-  );
-}
-
-export async function upsertParticipant(
-  participantId: string,
-  profile: Profile,
-): Promise<Participant> {
-  const store = await loadStore();
-  const email = profile.email.trim().toLowerCase();
-  const byEmail = store.participants.find(
-    (item) => item.email.trim().toLowerCase() === email,
-  );
-  if (byEmail) {
-    Object.assign(byEmail, profile, { email });
-    await persist(store);
-    return byEmail;
-  }
-  const existing = store.participants.find((item) => item.participantId === participantId);
-  if (existing) {
-    Object.assign(existing, profile, { email });
-    await persist(store);
-    return existing;
-  }
-  const created: Participant = {
-    participantId,
-    finished: false,
-    ...profile,
-    email,
-  };
-  store.participants.push(created);
-  await persist(store);
-  return created;
-}
-
-export async function finishParticipant(participantId: string) {
-  const store = await loadStore();
-  const existing = store.participants.find((item) => item.participantId === participantId);
-  if (!existing) return null;
-  existing.finished = true;
-  await persist(store);
-  return existing;
-}
-
-export async function reopenParticipant(participantId: string) {
-  const store = await loadStore();
-  const existing = store.participants.find((item) => item.participantId === participantId);
-  if (!existing) return null;
-  existing.finished = false;
-  await persist(store);
-  return existing;
+  return (data ?? []).map(toQuestion);
 }
 
 export async function countForEmail(email: string): Promise<number> {
-  const store = await loadStore();
   const needle = email.trim().toLowerCase();
-  return store.questions.filter((q) => q.email.trim().toLowerCase() === needle).length;
+  if (!needle) return 0;
+  const { count, error } = await db
+    .from("questions")
+    .select("id", { count: "exact", head: true })
+    .eq("email", needle);
+  if (error) throw new Error(error.message);
+  return count ?? 0;
 }
 
 export async function addQuestion(question: Question): Promise<Question> {
-  const store = await loadStore();
-  store.questions.push(question);
-  await persist(store);
-  notify();
-  return question;
-}
-/*
- * STEP 1 — edit the top of src/lib/store.ts:
- *
- *   a) Import the constant as a value (it's currently `import type`):
- *        import { MAX_QUESTIONS_PER_PERSON } from "./types";
- *        import type { Participant, Profile, Question } from "./types";
- *
- *   b) In asQuestion(), add one line so editedAt survives a reload:
- *        createdAt: value.createdAt,
- *        editedAt: value.editedAt ?? null,
- *
- * STEP 2 — paste everything below at the bottom of src/lib/store.ts.
- * (persist() and notify() are already defined in that file.)
- */
-
-function ownsQuestion(question: Question, participantId: string, email?: string) {
-  if (question.participantId === participantId) return true;
-  return (
-    !!email && question.email.trim().toLowerCase() === email.trim().toLowerCase()
-  );
+  const { data, error } = await db
+    .from("questions")
+    .insert({
+      id: question.id,
+      participant_id: question.participantId,
+      ...profileRow(question),
+      body: question.body,
+      created_at: question.createdAt,
+    })
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  await notify();
+  return toQuestion(data);
 }
 
 export async function updateQuestionBody(
@@ -195,62 +105,170 @@ export async function updateQuestionBody(
   participantId: string,
   body: string,
 ): Promise<Question | null> {
-  const store = await loadStore();
-  const participant = store.participants.find((p) => p.participantId === participantId);
-  const question = store.questions.find(
-    (q) => q.id === id && ownsQuestion(q, participantId, participant?.email),
+  const { data: current, error: findError } = await db
+    .from("questions")
+    .select("*")
+    .eq("id", id)
+    .eq("participant_id", participantId)
+    .maybeSingle();
+  if (findError) throw new Error(findError.message);
+  if (!current) return null;
+  if (current.body === body) return toQuestion(current);
+
+  const updated = check(
+    await db
+      .from("questions")
+      .update({ body, edited_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("participant_id", participantId)
+      .select()
+      .single(),
   );
-  if (!question) return null;
-  if (question.body !== body) {
-    question.body = body;
-    question.editedAt = new Date().toISOString();
-    await persist(store);
-    notify();
-  }
-  return question;
+  await notify();
+  return toQuestion(updated);
 }
 
 export async function deleteQuestion(id: string, participantId: string): Promise<boolean> {
-  const store = await loadStore();
-  const participant = store.participants.find((p) => p.participantId === participantId);
-  const target = store.questions.find(
-    (q) => q.id === id && ownsQuestion(q, participantId, participant?.email),
-  );
+  const { data: target, error: findError } = await db
+    .from("questions")
+    .select("id")
+    .eq("id", id)
+    .eq("participant_id", participantId)
+    .maybeSingle();
+  if (findError) throw new Error(findError.message);
   if (!target) return false;
 
-  const ownedBefore = store.questions.filter((q) =>
-    ownsQuestion(q, participantId, participant?.email),
-  ).length;
+  const { count } = await db
+    .from("questions")
+    .select("id", { count: "exact", head: true })
+    .eq("participant_id", participantId);
 
-  store.questions = store.questions.filter((q) => q.id !== id);
+  check(
+    await db.from("questions").delete().eq("id", id).eq("participant_id", participantId),
+  );
 
   // They had hit the cap, so deleting frees a slot: reopen asking.
-  if (participant?.finished && ownedBefore >= MAX_QUESTIONS_PER_PERSON) {
-    participant.finished = false;
+  if ((count ?? 0) >= MAX_QUESTIONS_PER_PERSON) {
+    check(
+      await db
+        .from("participants")
+        .update({ finished: false })
+        .eq("id", participantId)
+        .eq("finished", true),
+    );
   }
 
-  await persist(store);
-  notify();
+  await notify();
   return true;
+}
+
+/* ---------- participants ---------- */
+
+export async function getParticipant(participantId: string) {
+  if (!participantId) return null;
+  const { data, error } = await db
+    .from("participants")
+    .select("*")
+    .eq("id", participantId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? toParticipant(data) : null;
+}
+
+export async function getParticipantByEmail(email: string) {
+  const { data, error } = await db
+    .from("participants")
+    .select("*")
+    .eq("email", email.trim().toLowerCase())
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? toParticipant(data) : null;
+}
+
+export async function upsertParticipant(
+  participantId: string,
+  profile: Profile,
+): Promise<Participant> {
+  const email = profile.email.trim().toLowerCase();
+  const row = profileRow({ ...profile, email });
+
+  // Same email already registered: reuse that participant (matches your old behaviour)
+  const { data: byEmail, error: e1 } = await db
+    .from("participants")
+    .select("id")
+    .eq("email", email)
+    .maybeSingle();
+  if (e1) throw new Error(e1.message);
+  if (byEmail) {
+    const updated = check(
+      await db.from("participants").update(row).eq("id", byEmail.id).select().single(),
+    );
+    return toParticipant(updated);
+  }
+
+  // Same cookie id already registered: update its details
+  const { data: byId, error: e2 } = await db
+    .from("participants")
+    .select("id")
+    .eq("id", participantId)
+    .maybeSingle();
+  if (e2) throw new Error(e2.message);
+  if (byId) {
+    const updated = check(
+      await db.from("participants").update(row).eq("id", participantId).select().single(),
+    );
+    return toParticipant(updated);
+  }
+
+  const created = check(
+    await db.from("participants").insert({ id: participantId, ...row }).select().single(),
+  );
+  return toParticipant(created);
+}
+
+export async function finishParticipant(participantId: string) {
+  const { data, error } = await db
+    .from("participants")
+    .update({ finished: true })
+    .eq("id", participantId)
+    .select()
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? toParticipant(data) : null;
+}
+
+export async function reopenParticipant(participantId: string) {
+  const { data, error } = await db
+    .from("participants")
+    .update({ finished: false })
+    .eq("id", participantId)
+    .select()
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? toParticipant(data) : null;
 }
 
 export async function updateParticipantProfile(
   participantId: string,
   profile: Profile,
 ): Promise<{ participant: Participant } | { error: string; status: number }> {
-  const store = await loadStore();
-  const participant = store.participants.find((p) => p.participantId === participantId);
-  if (!participant) return { error: "We couldn’t find your details.", status: 404 };
+  const current = await getParticipant(participantId);
+  if (!current) return { error: "We couldn’t find your details.", status: 404 };
 
   const email = profile.email.trim().toLowerCase();
-  const taken = store.participants.find(
-    (p) => p.participantId !== participantId && p.email.trim().toLowerCase() === email,
-  );
+  const next: Profile = { ...profile, email };
+
+  const { data: taken, error: takenError } = await db
+    .from("participants")
+    .select("id")
+    .eq("email", email)
+    .neq("id", participantId)
+    .maybeSingle();
+  if (takenError) throw new Error(takenError.message);
   if (taken) {
     return { error: "That email address is already used by someone else.", status: 409 };
   }
 
-  const next: Profile = { ...profile, email };
   const keys: (keyof Profile)[] = [
     "firstName",
     "lastName",
@@ -259,35 +277,30 @@ export async function updateParticipantProfile(
     "company",
     "designation",
   ];
-  const changed = keys.some((key) => participant[key] !== next[key]);
-  if (!changed) return { participant };
+  if (!keys.some((key) => current[key] !== next[key])) return { participant: current };
 
-  const oldEmail = participant.email.trim().toLowerCase();
-  Object.assign(participant, next, { editedAt: new Date().toISOString() });
-
-  // Questions carry a copy of the profile, so keep them in sync
-  // (their own editedAt is NOT touched — the question text didn't change).
-  for (const question of store.questions) {
-    if (
-      question.participantId === participantId ||
-      question.email.trim().toLowerCase() === oldEmail
-    ) {
-      Object.assign(question, next);
+  const { data, error } = await db
+    .from("participants")
+    .update({ ...profileRow(next), edited_at: new Date().toISOString() })
+    .eq("id", participantId)
+    .select()
+    .single();
+  if (error) {
+    if (error.code === "23505") {
+      return { error: "That email address is already used by someone else.", status: 409 };
     }
+    throw new Error(error.message);
   }
 
-  await persist(store);
-  notify();
-  return { participant };
+  // Questions carry a copy of the profile; keep them in sync (their edited_at is untouched)
+  check(await db.from("questions").update(profileRow(next)).eq("participant_id", participantId));
+
+  await notify();
+  return { participant: toParticipant(data) };
 }
 
 export async function deleteParticipantAndQuestions(participantId: string): Promise<void> {
-  const store = await loadStore();
-  const participant = store.participants.find((p) => p.participantId === participantId);
-  store.questions = store.questions.filter(
-    (q) => !ownsQuestion(q, participantId, participant?.email),
-  );
-  store.participants = store.participants.filter((p) => p.participantId !== participantId);
-  await persist(store);
-  notify();
+  // questions are removed by "on delete cascade"
+  check(await db.from("participants").delete().eq("id", participantId));
+  await notify();
 }

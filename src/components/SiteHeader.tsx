@@ -24,12 +24,12 @@ export function SiteHeader() {
         <Link href="/" data-active={pathname === "/" ? "true" : "false"}>
           Ask
         </Link>
-        <Link
+        {/* <Link
           href="/dashboard"
           data-active={pathname === "/dashboard" ? "true" : "false"}
         >
           Admin
-        </Link>
+        </Link> */}
       </nav>
     </header>
   );

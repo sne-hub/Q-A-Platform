@@ -7,18 +7,6 @@ import { MAX_QUESTIONS_PER_PERSON, type Participant, type Question } from "@/lib
 type Step = "details" | "questions" | "done";
 type View = "questions" | "details";
 
-/*
- * Types: add an optional `editedAt?: string | null` to BOTH Participant and
- * Question in "@/lib/types". Anything with a truthy editedAt shows an "edited" tag.
- *
- * API routes this component expects:
- *   PATCH  /api/session           body: profile      -> { participant, questions }
- *   DELETE /api/session                              -> { ok: true }  (removes details + questions)
- *   PATCH  /api/questions/:id     body: { body }     -> { questions, participant? }
- *   DELETE /api/questions/:id                        -> { questions, participant? }
- * The server should set editedAt on every successful PATCH, and should only
- * allow a participant to change their own records.
- */
 
 const emptyProfile = {
   firstName: "",
@@ -391,19 +379,34 @@ export function AskFlow() {
           </form>
         ) : null}
 
-        {step === "done" && participant ? (
-          <div className="success">
-            <h2>
-              {questions.length >= MAX_QUESTIONS_PER_PERSON
-                ? "That’s your three."
-                : "Your questions are closed."}
-            </h2>
-            <p className="lede">
-              Thanks, {participant.firstName} {participant.lastName}. Only you can see your
-              questions and details below. Admins review the full list on the dashboard.
-            </p>
-          </div>
-        ) : null}
+     {step === "done" && participant ? (
+  <div className="success">
+    <h2>
+      {questions.length >= MAX_QUESTIONS_PER_PERSON
+        ? "That’s your three."
+        : "Your questions are closed."}
+    </h2>
+    <p className="lede">
+      Thanks, {participant.firstName} {participant.lastName}. Only you can see your
+      questions and details below. Admins review the full list on the dashboard.
+    </p>
+    {error && !editingQuestionId && !editingDetails ? (
+      <p className="error">{error}</p>
+    ) : null}
+    {questions.length < MAX_QUESTIONS_PER_PERSON ? (
+      <div className="actions wrap">
+        <button
+          className="primary"
+          type="button"
+          onClick={reopenQuestions}
+          disabled={busy}
+        >
+          {busy ? "Reopening…" : "Reopen"}
+        </button>
+      </div>
+    ) : null}
+  </div>
+) : null}
       </section>
 
       {participant ? (
