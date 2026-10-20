@@ -1,4 +1,4 @@
-// lib/supabase/server.ts
+// src/lib/supabase/server.ts
 import { createClient } from "@supabase/supabase-js";
 
 export const supabaseAdmin = createClient(

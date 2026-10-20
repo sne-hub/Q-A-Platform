@@ -396,3 +396,19 @@ textarea:focus {
     max-width: none;
   }
 }
+@media (max-width: 768px) {
+  .kicker {
+    font-size: 1.25rem;
+    letter-spacing: 0.08em;
+    gap: 6px;
+  }
+}
+
+/* Small mobile screens */
+@media (max-width: 480px) {
+  .kicker {
+    font-size: 0.95rem;
+    letter-spacing: 0.05em;
+    gap: 4px;
+  }
+}

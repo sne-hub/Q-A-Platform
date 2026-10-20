@@ -6,7 +6,8 @@ export const ADMIN_COOKIE = "qa_admin";
 const ADMIN_TOKEN = "ok";
 
 export function adminPassword() {
-  return process.env.ADMIN_PASSWORD || "sanral";
+  return process.env.ADMIN_PASSWORD 
+  ;
 }
 
 export function isAdminRequest(request: NextRequest) {

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { participantIdFrom } from "@/lib/auth";
-import { questionsForViewer } from "@/lib/group";
-import { deleteQuestion, getParticipant, listQuestions, updateQuestionBody } from "@/lib/store";
+import { supabaseAdmin } from "@/lib/supabase/server";
+import { loadQuestions, loadSession } from "@/lib/data";
+import { rowToQuestion } from "@/lib/mappers";
 import { clean } from "@/lib/validate";
 
 export const runtime = "nodejs";
@@ -34,21 +35,28 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     );
   }
 
-  const updated = await updateQuestionBody(id, participantId, body);
-  if (!updated) {
+  const { data, error } = await supabaseAdmin
+    .from("questions")
+    .update({ body, edited_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("participant_id", participantId)
+    .select()
+    .maybeSingle();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  if (!data) {
     return NextResponse.json(
       { error: "Question not found or you don't have permission to edit it." },
       { status: 404 },
     );
   }
 
-  const participant = await getParticipant(participantId);
-  const questions = questionsForViewer(await listQuestions(), {
-    isAdmin: false,
-    email: participant?.email ?? "",
+  return NextResponse.json({
+    question: rowToQuestion(data),
+    questions: await loadQuestions(participantId),
   });
-
-  return NextResponse.json({ question: updated, questions });
 }
 
 export async function DELETE(request: NextRequest, { params }: Params) {
@@ -62,19 +70,27 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     );
   }
 
-  const deleted = await deleteQuestion(id, participantId);
-  if (!deleted) {
+  const { data, error } = await supabaseAdmin
+    .from("questions")
+    .delete()
+    .eq("id", id)
+    .eq("participant_id", participantId)
+    .select("id");
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  if (!data?.length) {
     return NextResponse.json(
       { error: "Question not found or you don't have permission to delete it." },
       { status: 404 },
     );
   }
 
-  const participant = await getParticipant(participantId);
-  const questions = questionsForViewer(await listQuestions(), {
-    isAdmin: false,
-    email: participant?.email ?? "",
+  const session = await loadSession(participantId);
+  return NextResponse.json({
+    ok: true,
+    questions: session?.questions ?? [],
+    participant: session?.participant ?? null,
   });
-
-  return NextResponse.json({ ok: true, questions, participant });
 }
