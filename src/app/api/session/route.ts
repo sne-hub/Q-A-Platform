@@ -12,6 +12,7 @@ import {
 import { MAX_QUESTIONS_PER_PERSON } from "@/lib/types";
 import { readProfile } from "@/lib/validate";
 
+
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
