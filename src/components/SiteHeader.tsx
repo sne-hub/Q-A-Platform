@@ -18,12 +18,12 @@ export function SiteHeader() {
           height={140}
           priority
         />
-        <span>Live questions from the room</span>
+        <span>Q&A Dashboard.</span>
       </Link>
       <nav className="nav">
-        <Link href="/" data-active={pathname === "/" ? "true" : "false"}>
+        {/* <Link href="/" data-active={pathname === "/" ? "true" : "false"}>
           Ask
-        </Link>
+        </Link> */}
      
       </nav>
     </header>
